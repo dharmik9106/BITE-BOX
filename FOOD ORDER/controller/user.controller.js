@@ -14,8 +14,8 @@ const add = async (req, res, next) => {
             password,
             phone,
             address,
-            ProfilePic:req.file?.path || null,
-            cloudinary_id:req.file?.filename || null,
+            ProfilePic: req.file?.path || null,
+            cloudinary_id: req.file?.filename || null,
         });
 
         const alreadyUser = await User.findOne({ email });// check email id
@@ -37,36 +37,28 @@ const add = async (req, res, next) => {
 };
 
 // user login by email,password
-const login = async (req, res) => {
+const login = async (req, res, next) => {
     try {
+
         const { email, password } = req.body;
 
-        // Check email and password
-        if (!email || !password) {
-            return res.status(400).json({
-                success: false,
-                message: "Email and Password are required",
-            });
+        const userLogin = await User.findByCredentials(email, password);
+
+
+        if (!userLogin) {
+            return next(new HttpError("please check details", 400));
         }
 
-        // Find user using static method
-        const user = await User.findByCredentials(email, password);
-
-        // Generate JWT Token
-        const token = await user.generateAuthToken();
+        const token = await userLogin.generateAuthToken();
 
         res.status(200).json({
             success: true,
-            message: "Login Successfully",
-            user,
-            token,
+            message: "new user create successFully",
+            data: userLogin, // display login user
         });
 
     } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message,
-        });
+        return next(new HttpError(error.message, 500));
     }
 };
 
@@ -95,11 +87,21 @@ const authLogin = async (req, res, next) => {
 const update = async (req, res, next) => {
     try {
 
-        const user = req.user;
+        const TargetUser = req.params.id || req.user._id;
+
+        const user = await User.findById(TargetUser);
+
+        if(!user){
+            return next (new HttpError("user not found",404));
+        }
 
         const updates = Object.keys(req.body);
 
-        const allowedFields = ["name", "phone", "address"];
+        let allowedFields = ["name", "phone", "address"];
+
+        if (req.user.role === "admin") {
+            allowedFields = [...allowedFields, "isVerified"];
+        }
 
         const isValidUpdates = updates.every((field) =>
             allowedFields.includes(field));
@@ -111,6 +113,14 @@ const update = async (req, res, next) => {
         updates.forEach((update) => {
             user[update] = req.body[update];
         });
+
+        if (req.file) {
+            if (user.cloudinary_id) {
+                await cloudinary.uploader.destroy(user.cloudinary_id);
+            }
+            user.ProfilePic = req.file?.path;
+            user.cloudinary_id = req.file?.filename;
+        }
 
         await user.save();
 
@@ -180,7 +190,10 @@ const logOutAll = async (req, res, next) => {
 
 const deleteUser = async (req, res, next) => {
     try {
-        const user = req.user;
+
+        const TargetUser = req.params.id || req.user._id;
+
+        const user = await User.findById(TargetUser);
 
         await user.deleteOne();
 
